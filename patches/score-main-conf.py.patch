@@ -1,0 +1,12 @@
+--- a/docs/conf.py
++++ b/docs/conf.py
+@@ -22,5 +22,9 @@
+     # https://github.com/useblocks/sphinx-needs/pull/1508 is merged and docs-as-code
+     # is updated with new sphinx-needs version
+     "sphinxcontrib.plantuml",
+     "score_sphinx_bundle",
++    "ubt_sphinx",
+ ]
++
++ubtrace_organization = "eclipse-score"
++ubtrace_project = "score"
