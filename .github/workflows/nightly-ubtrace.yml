@@ -72,22 +72,26 @@ jobs:
       - name: Setup Bazel
         uses: bazel-contrib/setup-bazel@0.19.0
 
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
       - name: Setup uv
         uses: astral-sh/setup-uv@v6
 
-      - name: Bazel ide_support (materializes .venv_docs and runfiles)
+      - name: Bazel ide_support (materializes .venv_docs/site-packages and runfiles)
         working-directory: score
         run: bazel run //:ide_support
 
-      - name: Install ubt-sphinx into a sibling overlay directory
-        working-directory: score
+      - name: Install ubt-sphinx into an overlay (resolves via pypi.useblocks.com)
         run: |
-          # The Bazel-built .venv_docs is read-only, so we install ubt-sphinx
-          # into a sibling directory using uv's --target mode, then prepend
-          # that directory to PYTHONPATH for the sphinx-build step below.
+          # Use system python3.12 (not the Bazel-wrapped one) so uv can probe
+          # the interpreter cleanly. --target installs into a flat directory
+          # the build step picks up via PYTHONPATH.
           uv pip install \
-            --python .venv_docs/bin/python \
-            --target ../ubt-overlay \
+            --python python3.12 \
+            --target ubt-overlay \
             --index-url https://pypi.org/simple \
             --extra-index-url https://pypi.useblocks.com/ \
             --index-strategy unsafe-best-match \
@@ -99,11 +103,15 @@ jobs:
       - name: Build ubTrace artifact
         working-directory: score
         env:
-          # Prepend the ubt-sphinx overlay so the activated venv picks it up.
-          PYTHONPATH: ${{ github.workspace }}/ubt-overlay
+          # bazel ide_support populates .venv_docs/lib/python3.12/site-packages
+          # with all docs-as-code extensions + transitive deps. ubt-overlay
+          # adds ubt-sphinx and the deps it pulled in. We invoke system
+          # python3.12 directly (not the Bazel-wrapped launcher in
+          # .venv_docs/bin/python, which needs runfiles env to bootstrap)
+          # and stitch the two trees via PYTHONPATH.
+          PYTHONPATH: ${{ github.workspace }}/score/.venv_docs/lib/python3.12/site-packages:${{ github.workspace }}/ubt-overlay
         run: |
-          source .venv_docs/bin/activate
-          sphinx-build -W -b ubtrace \
+          python3.12 -m sphinx -b ubtrace \
             -D ubtrace_version="${{ matrix.ref }}" \
             docs docs/_build/ubtrace
 
