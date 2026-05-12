@@ -105,6 +105,7 @@ jobs:
         run: uv sync
 
       - name: Build ubTrace artifact
+        working-directory: score
         env:
           # PYTHONPATH layers (lowest priority first):
           # - orchestrator/shims: provides a `python.runfiles` shim that
@@ -116,10 +117,12 @@ jobs:
           #   `score_sphinx_bundle` by its bare name.
           PYTHONPATH: ${{ github.workspace }}/orchestrator/shims:${{ github.workspace }}/docs-as-code:${{ github.workspace }}/docs-as-code/src/extensions
         run: |
-          source orchestrator/.venv/bin/activate
+          # Run from inside score/ so docs-as-code's find_git_root() walks up
+          # from cwd and lands on score's own .git directory.
+          source ../orchestrator/.venv/bin/activate
           sphinx-build -W -b ubtrace \
             -D ubtrace_version="${{ matrix.ref }}" \
-            score/docs score/docs/_build/ubtrace
+            docs docs/_build/ubtrace
 
       - name: Upload to ubTrace
         env:
