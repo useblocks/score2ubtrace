@@ -79,11 +79,23 @@ jobs:
         working-directory: score
         run: bazel run //:ide_support
 
+      - name: Inspect .venv_docs layout
+        working-directory: score
+        run: |
+          echo "--- .venv_docs (top) ---"
+          ls -la .venv_docs/ || true
+          echo "--- .venv_docs/bin ---"
+          ls -la .venv_docs/bin/ 2>/dev/null || echo "(no bin/)"
+          echo "--- python resolution ---"
+          readlink -f .venv_docs 2>&1 || true
+          readlink -f .venv_docs/bin/python 2>&1 || echo "(no python symlink)"
+          which python3 && python3 --version
+
       - name: Layer ubt-sphinx into the Bazel-managed venv
         working-directory: score
         run: |
           uv pip install \
-            --python .venv_docs/bin/python \
+            --python .venv_docs \
             --index-url https://pypi.org/simple \
             --extra-index-url https://pypi.useblocks.com/ \
             --index-strategy unsafe-best-match \
