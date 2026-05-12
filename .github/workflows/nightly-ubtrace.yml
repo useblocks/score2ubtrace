@@ -1,0 +1,115 @@
+name: Nightly ubTrace publish
+
+on:
+  schedule:
+    - cron: '0 2 * * *'
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: 'Single ref to publish (overrides the nightly matrix). Default main.'
+        required: false
+        default: 'main'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: nightly-ubtrace
+  cancel-in-progress: false
+
+env:
+  SCORE_REPO: eclipse-score/score
+  DAC_REPO: eclipse-score/docs-as-code
+  DAC_REF: v4.0.3
+  TAG_MIN: v0.5.5
+  UBTRACE_URL: https://api.team.useblocks.com/api
+  UBTRACE_ORG: eclipse-score
+  UBTRACE_PROJECT: score
+
+jobs:
+  list-refs:
+    runs-on: ubuntu-latest
+    outputs:
+      refs: ${{ steps.compute.outputs.refs }}
+    steps:
+      - name: Checkout orchestrator
+        uses: actions/checkout@v6
+
+      - name: Compute ref matrix
+        id: compute
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          dispatch_ref=""
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            dispatch_ref="${{ github.event.inputs.ref }}"
+          fi
+          refs="$(./scripts/list-refs.sh "${dispatch_ref}")"
+          echo "refs=${refs}" >> "${GITHUB_OUTPUT}"
+          echo "Matrix: ${refs}"
+
+  build-and-publish:
+    needs: list-refs
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        ref: ${{ fromJSON(needs.list-refs.outputs.refs) }}
+    steps:
+      - name: Checkout orchestrator
+        uses: actions/checkout@v6
+        with:
+          path: orchestrator
+
+      - name: Checkout score@${{ matrix.ref }}
+        uses: actions/checkout@v6
+        with:
+          repository: ${{ env.SCORE_REPO }}
+          ref: ${{ matrix.ref }}
+          path: score
+
+      - name: Checkout docs-as-code@${{ env.DAC_REF }}
+        uses: actions/checkout@v6
+        with:
+          repository: ${{ env.DAC_REPO }}
+          ref: ${{ env.DAC_REF }}
+          path: docs-as-code
+
+      - name: Apply docs-as-code patches
+        run: |
+          for p in orchestrator/patches/docs-as-code-${{ env.DAC_REF }}-*.patch; do
+            echo "::group::Applying $(basename "${p}")"
+            git -C docs-as-code apply --3way "../${p}"
+            echo "::endgroup::"
+          done
+
+      - name: Install Graphviz
+        run: sudo apt update && sudo apt install -y graphviz
+
+      - name: Setup Bazel
+        uses: bazel-contrib/setup-bazel@0.19.0
+
+      - name: Regenerate docs-as-code requirements.txt
+        working-directory: docs-as-code
+        run: bazel run //src:requirements.update
+
+      - name: Apply score patches
+        run: |
+          for p in orchestrator/patches/score-main-*.patch; do
+            echo "::group::Applying $(basename "${p}")"
+            git -C score apply --3way "../${p}"
+            echo "::endgroup::"
+          done
+
+      - name: Build ubTrace artifact
+        working-directory: score
+        run: |
+          # Primary command — resolved during Task 12 if it fails.
+          bazel run //:docs -- --builder ubtrace --ubtrace_version "${{ matrix.ref }}"
+
+      - name: Upload to ubTrace
+        env:
+          UBTRACE_INGEST_TOKEN: ${{ secrets.UBTRACE_INGEST_TOKEN }}
+          UBTRACE_VERSION: ${{ matrix.ref }}
+          BUILD_DIR: score/docs/_build/ubtrace/${{ env.UBTRACE_ORG }}/${{ env.UBTRACE_PROJECT }}/${{ matrix.ref }}
+        run: bash orchestrator/upload.sh
