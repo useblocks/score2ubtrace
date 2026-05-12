@@ -22,6 +22,7 @@ env:
   DAC_REPO: eclipse-score/docs-as-code
   DAC_REF: v4.0.3
   TAG_MIN: v0.5.5
+  PLANTUML_VERSION: '1.2025.0'
   UBTRACE_URL: https://api.team.useblocks.com/api
   UBTRACE_ORG: eclipse-score
   UBTRACE_PROJECT: score
@@ -75,37 +76,42 @@ jobs:
           ref: ${{ env.DAC_REF }}
           path: docs-as-code
 
-      - name: Apply docs-as-code patches
+      - name: Install Graphviz + JRE + PlantUML
         run: |
-          for p in orchestrator/patches/docs-as-code-${{ env.DAC_REF }}-*.patch; do
-            echo "::group::Applying $(basename "${p}")"
-            git -C docs-as-code apply --3way "../${p}"
-            echo "::endgroup::"
-          done
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get --yes install graphviz default-jre-headless
+          sudo curl --fail --silent --show-error --location \
+            --output /usr/local/bin/plantuml.jar \
+            "https://github.com/plantuml/plantuml/releases/download/v${PLANTUML_VERSION}/plantuml-${PLANTUML_VERSION}.jar"
+          printf '#!/bin/sh\nexec java -jar /usr/local/bin/plantuml.jar "$@"\n' \
+            | sudo tee /usr/local/bin/plantuml > /dev/null
+          sudo chmod +x /usr/local/bin/plantuml
+          plantuml -version
 
-      - name: Install Graphviz
-        run: sudo apt update && sudo apt install -y graphviz
+      - name: Setup uv
+        uses: astral-sh/setup-uv@v6
 
-      - name: Setup Bazel
-        uses: bazel-contrib/setup-bazel@0.19.0
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
 
-      - name: Regenerate docs-as-code requirements.txt
-        working-directory: docs-as-code
-        run: bazel run //src:requirements.update
+      - name: Apply score conf.py patch
+        run: git -C score apply --3way ../orchestrator/patches/score-main-conf.py.patch
 
-      - name: Apply score patches
-        run: |
-          for p in orchestrator/patches/score-main-*.patch; do
-            echo "::group::Applying $(basename "${p}")"
-            git -C score apply --3way "../${p}"
-            echo "::endgroup::"
-          done
+      - name: Sync uv venv
+        working-directory: orchestrator
+        run: uv sync
 
       - name: Build ubTrace artifact
-        working-directory: score
+        env:
+          PYTHONPATH: ${{ github.workspace }}/docs-as-code/src/extensions
         run: |
-          # Primary command — resolved during Task 12 if it fails.
-          bazel run //:docs -- --builder ubtrace --ubtrace_version "${{ matrix.ref }}"
+          source orchestrator/.venv/bin/activate
+          sphinx-build -W -b ubtrace \
+            -D ubtrace_version="${{ matrix.ref }}" \
+            score/docs score/docs/_build/ubtrace
 
       - name: Upload to ubTrace
         env:

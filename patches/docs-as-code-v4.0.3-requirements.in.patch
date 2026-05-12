@@ -1,9 +1,0 @@
---- a/src/requirements.in
-+++ b/src/requirements.in
-@@ -36,3 +36,6 @@
- # Local development
- pytest
- basedpyright
-+
-+# Required for ubtrace publishing (resolved from pypi.useblocks.com)
-+ubt-sphinx>=0.7.1
