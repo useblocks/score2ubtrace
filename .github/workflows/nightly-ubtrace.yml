@@ -19,10 +19,7 @@ concurrency:
 
 env:
   SCORE_REPO: eclipse-score/score
-  DAC_REPO: eclipse-score/docs-as-code
-  DAC_REF: v4.0.3
   TAG_MIN: v0.5.5
-  PLANTUML_VERSION: '1.2025.0'
   UBTRACE_URL: https://api.team.useblocks.com/api
   UBTRACE_ORG: eclipse-score
   UBTRACE_PROJECT: score
@@ -69,57 +66,36 @@ jobs:
           ref: ${{ matrix.ref }}
           path: score
 
-      - name: Checkout docs-as-code@${{ env.DAC_REF }}
-        uses: actions/checkout@v6
-        with:
-          repository: ${{ env.DAC_REPO }}
-          ref: ${{ env.DAC_REF }}
-          path: docs-as-code
+      - name: Install Graphviz
+        run: sudo apt-get update && sudo apt-get install -y graphviz
 
-      - name: Install Graphviz + JRE + PlantUML
-        run: |
-          set -euo pipefail
-          sudo apt-get update
-          sudo apt-get --yes install graphviz default-jre-headless
-          sudo curl --fail --silent --show-error --location \
-            --output /usr/local/bin/plantuml.jar \
-            "https://github.com/plantuml/plantuml/releases/download/v${PLANTUML_VERSION}/plantuml-${PLANTUML_VERSION}.jar"
-          printf '#!/bin/sh\nexec java -jar /usr/local/bin/plantuml.jar "$@"\n' \
-            | sudo tee /usr/local/bin/plantuml > /dev/null
-          sudo chmod +x /usr/local/bin/plantuml
-          plantuml -version
+      - name: Setup Bazel
+        uses: bazel-contrib/setup-bazel@0.19.0
 
       - name: Setup uv
         uses: astral-sh/setup-uv@v6
 
-      - name: Set up Python
-        uses: actions/setup-python@v6
-        with:
-          python-version: '3.12'
+      - name: Bazel ide_support (materializes .venv_docs and runfiles)
+        working-directory: score
+        run: bazel run //:ide_support
+
+      - name: Layer ubt-sphinx into the Bazel-managed venv
+        working-directory: score
+        run: |
+          uv pip install \
+            --python .venv_docs/bin/python \
+            --index-url https://pypi.org/simple \
+            --extra-index-url https://pypi.useblocks.com/ \
+            --index-strategy unsafe-best-match \
+            ubt-sphinx
 
       - name: Apply score conf.py patch
         run: git -C score apply --3way ../orchestrator/patches/score-main-conf.py.patch
 
-      - name: Sync uv venv
-        working-directory: orchestrator
-        run: uv sync
-
       - name: Build ubTrace artifact
         working-directory: score
-        env:
-          # PYTHONPATH layers (lowest priority first):
-          # - orchestrator/shims: provides a `python.runfiles` shim that
-          #   re-exports the PyPI `bazel-runfiles` package under the Bazel
-          #   `@rules_python//python/runfiles` namespace docs-as-code uses.
-          # - docs-as-code: so `from src.helper_lib import ...` resolves
-          #   (docs-as-code/src/__init__.py exists; `src` is the package).
-          # - docs-as-code/src/extensions: so score's conf.py can import
-          #   `score_sphinx_bundle` by its bare name.
-          PYTHONPATH: ${{ github.workspace }}/orchestrator/shims:${{ github.workspace }}/docs-as-code:${{ github.workspace }}/docs-as-code/src/extensions
         run: |
-          # Run from inside score/ so docs-as-code's find_git_root() walks up
-          # from cwd and lands on score's own .git directory.
-          source ../orchestrator/.venv/bin/activate
+          source .venv_docs/bin/activate
           sphinx-build -W -b ubtrace \
             -D ubtrace_version="${{ matrix.ref }}" \
             docs docs/_build/ubtrace
