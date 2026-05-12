@@ -10,3 +10,18 @@ if [[ -n "${DISPATCH_REF}" ]]; then
   jq -nc --arg r "${DISPATCH_REF}" '[$r]'
   exit 0
 fi
+
+TAG_MIN="${TAG_MIN:-v0.5.5}"
+
+tags="$(gh api repos/eclipse-score/score/tags --paginate --jq '.[].name')"
+
+newer="$(printf '%s\n%s\n' "${TAG_MIN}" "${tags}" \
+  | sort -V \
+  | awk -v cut="${TAG_MIN}" '
+      seen && $0 != cut && index($0, cut "-") != 1 { print }
+      $0 == cut { seen = 1 }
+    ')"
+
+printf 'main\n%s\n' "${newer}" \
+  | grep -v '^$' \
+  | jq -Rn '[inputs]' -c
