@@ -110,9 +110,17 @@ jobs:
           # .venv_docs/bin/python, which needs runfiles env to bootstrap)
           # and stitch the two trees via PYTHONPATH.
           PYTHONPATH: ${{ github.workspace }}/score/.venv_docs/lib/python3.12/site-packages:${{ github.workspace }}/ubt-overlay
+          # score's score_source_code_linker extension only generates its
+          # score_source_code_linker_cache.json when it can find the workspace
+          # root via BUILD_WORKSPACE_DIRECTORY (normally set by `bazel run`).
+          # Since we invoke Sphinx directly (not through Bazel), we point it at
+          # the score checkout so the extension scans sources and writes the
+          # cache; otherwise its env-updated handler crashes on the missing file.
+          BUILD_WORKSPACE_DIRECTORY: ${{ github.workspace }}/score
         run: |
           python3.12 -m sphinx -b ubtrace \
             -D ubtrace_version="${{ matrix.ref }}" \
+            -D score_source_code_linker_plain_links=1 \
             docs docs/_build/ubtrace
 
       - name: Upload to ubTrace
